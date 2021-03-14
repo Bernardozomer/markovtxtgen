@@ -1,43 +1,59 @@
 """Generate a new sentence using a chain."""
 
-import numpy as np
 import random
 
+import numpy as np
 
-def create_sentence(chain, length, starting_word=None):
+
+def create_sentence(chain, length, sensitivity=0, starting_word=None):
     """Generate a new sentence using a chain."""
     if not starting_word:
-        # If not specified, the starting word is randomly chosen from
-        # the entire pool, which isn't optimal because
-        # some words are more likely to start sentences than others.
-        current_word = random.choice(chain.states)
+        # Randomly choose the starting word among every one
+        # whose state has an average position close enough
+        # to the start of a sentence.
+        possible_starts = [i for i in sorted(chain.states,
+                                             key=lambda x: x.average_pos)
+                           if i.average_pos <= 1 - sensitivity]
+
+        if not possible_starts:
+            possible_starts = chain.states
+
+        current_state = random.choice(possible_starts)
     else:
-        current_word = starting_word
+        current_state = chain.find_state(starting_word)
 
     # Store the sequence of words taken.
-    word_list = [current_word]
-    prob = 1
-    i = 1
+    states = [current_state]
+    # The count starts at 0, but the starting word
+    # has already been chosen.
+    current_pos = 1
 
-    while i <= length:
-        state_index = chain.states.index(current_word)
-
-        # End sentence early if the current word never precedes another one
-        # in the text file.
-        if not chain.transitions[state_index]:
+    while current_pos <= length - 1:
+        # End sentence early if the current word
+        # never precedes another one in the source file.
+        if not current_state.transitions:
             break
 
-        # Get the next word.
-        transition = np.random.choice(chain.transitions[state_index],
-                                      replace=True,
-                                      p=chain.transition_matrix[state_index])
-        transition_index = chain.transitions[state_index].index(transition)
-        current_word = transition
-        word_list.append(current_word)
+        relative_pos = current_pos / (length - 1)
 
-        prob = prob * chain.transition_matrix[state_index][transition_index]
-        i += 1
+        # Get every state whose average position is enough within range
+        # of the current relative position.
+        transitions = {key: val for key, val
+                       in current_state.transitions.items()
+                       if relative_pos - sensitivity <= key.average_pos
+                       <= relative_pos + sensitivity}
 
-    print('Sentence generated:\n' + ' '.join(i for i in word_list), sep=' ')
-    print('\nProbability of this possible sequence of states: ' + str(prob)
-          + '\n')
+        if not transitions:
+            transitions = current_state.transitions
+
+        # Get next word.
+        transitions = {k: v / total for total in (sum(transitions.values()),)
+                       for k, v in transitions.items()}
+        transition = np.random.choice(list(transitions.keys()), replace=True,
+                                      p=list(transitions.values()))
+
+        current_state = transition
+        states.append(current_state)
+        current_pos += 1
+
+    return ' '.join(i.content for i in states)
